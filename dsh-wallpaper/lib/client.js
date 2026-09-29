@@ -50,30 +50,21 @@ window.__ModuleLoader__.load({
 			".wpq_itemName{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;opacity:.85}",
 			".wpq_empty{opacity:.6;padding:6px 0}",
 			// While a wallpaper is showing, the shell's own opaque fills are the
-			// only things hiding it. Four surfaces carry one: the frame, the
-			// conversation root that fills the center column, the sidebar column,
-			// and the right panel that slides over the frame.
+			// only things hiding it. Two surfaces carry the opaque base token:
+			// the frame, and the conversation root that fills the center column.
+			// Everything between them (centerCol, rightbarCol, body, scrollBody)
+			// is already transparent, so lifting these two is sufficient.
 			//
-			// The sidebar and the right panel become fully transparent. The
-			// conversation root becomes a soft veil instead: dropping its fill
-			// entirely would leave message text sitting straight on the
-			// wallpaper, and a veil restores contrast without reintroducing a hard
-			// surface. It mixes the shell's own base token, so it follows the
-			// light/dark palette automatically, and it sits on top of the scrim
-			// — so the panel's dim slider still governs how much wallpaper shows
-			// through.
-			//
-			// Every selector is keyed off `data-wp-active`, the attribute the
-			// plugin sets on the frame and removes on cleanup, so the whole
-			// override stops applying the moment the layer unmounts. The
-			// conversation root is reached through the `data-slot` contract — a
-			// stable seam, matched structurally rather than by depth, so it keeps
-			// working across the conversation's own `data-phase` changes (hero /
-			// settling / active) that rebuild the subtree. Panels, docks, modals
-			// and the composer card are never caught.
+			// The frame is matched by its class fragment; the conversation root
+			// is matched through the `data-slot` contract instead, which is a
+			// stable seam, so no panel, dock or modal is caught by the rule. Both
+			// key off the attribute the plugin sets on the frame, so the whole
+			// override stops applying the moment the layer unmounts.
 			'div[class*="_frame"][data-wp-active="1"]{background:transparent!important}',
-			'div[class*="_frame"][data-wp-active="1"] [class*="_sidebarCol"],div[class*="_frame"][data-wp-active="1"] [class*="_panel"]{background:transparent!important}',
-			'div[class*="_frame"][data-wp-active="1"] [data-slot="main.conversation"]>*{background:color-mix(in srgb,var(--dsw-alias-bg-base) 55%,transparent)!important}'
+			'div[class*="_frame"][data-wp-active="1"] [data-slot="main.conversation"]>*{background:transparent!important}',
+			// Sidebar keeps its own fill so labels stay legible; it is dimmed
+			// instead of removed.
+			'[data-wp-active="1"] [class*="_sidebarCol"]{opacity:.92}'
 		].join("");
 		const styleTagId = "dsh-wallpaper/styles";
 		if (typeof document !== "undefined" && document.querySelector("style[data-plugin-css=" + JSON.stringify(styleTagId) + "]") === null) {
@@ -362,35 +353,14 @@ window.__ModuleLoader__.load({
 			// The same lookup yields the portal target: the layer is rendered
 			// there instead of inside the overlay seat, which sits above the
 			// columns and would hide it.
-			//
-			// The frame is not guaranteed to exist when this runs — the plugin
-			// can be applied before ui-layout has mounted it — so a miss schedules
-			// a retry instead of giving up, and the element is re-resolved on
-			// every attempt. Giving up on the first `null` left the wallpaper
-			// permanently invisible.
 			const [frame, setFrame] = (0, react.useState)(null);
 			(0, react.useEffect)(() => {
 				if (!item) return;
-				let cancelled = false;
-				let timer;
-				let target = null;
-				const attach = () => {
-					if (cancelled) return;
-					const el = document.querySelector('[class*="_frame"]');
-					if (el === null) {
-						timer = setTimeout(attach, 100);
-						return;
-					}
-					target = el;
-					el.setAttribute("data-wp-active", "1");
-					setFrame(el);
-				};
-				attach();
-				return () => {
-					cancelled = true;
-					if (timer !== undefined) clearTimeout(timer);
-					if (target !== null) target.removeAttribute("data-wp-active");
-				};
+				const el = document.querySelector('[class*="_frame"]');
+				if (!el) return;
+				setFrame(el);
+				el.setAttribute("data-wp-active", "1");
+				return () => el.removeAttribute("data-wp-active");
 			}, [item]);
 
 			return (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, {
