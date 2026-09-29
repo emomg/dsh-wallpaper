@@ -25,12 +25,17 @@ window.__ModuleLoader__.load({
 			// fill but before its in-flow children — the columns — exactly the
 			// ordering a background needs.
 			//
-			// It is sized to the viewport rather than to the frame. The frame is a
-			// grid that resolves against its own box, and any strip of page
-			// outside it stayed unpainted, which showed up as a bare band along
-			// the bottom once a wallpaper was set. Locking the layer to the
-			// viewport closes that gap for any frame geometry.
-			".wpq_root{position:absolute;top:0;left:0;width:100vw;height:100vh;z-index:-1;pointer-events:none;overflow:hidden}",
+			// The layer lives on the body rather than inside the frame. The frame
+			// sets `overflow: hidden`, so a child sized to the viewport is still
+			// clipped to the frame's own box — which is what left a bare band
+			// along the bottom however it was sized. On the body there is no
+			// clip, so `position: fixed` covers the viewport exactly.
+			//
+			// `z-index: 0` on a fixed layer is enough here: the shell's own root
+			// is an ordinary in-flow element painted after it, and the frame's
+			// fill is made transparent by the rules below, so the columns still
+			// read on top.
+			".wpq_root{position:fixed;top:0;left:0;width:100vw;height:100vh;z-index:0;pointer-events:none;overflow:hidden}",
 			".wpq_layer{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block}",
 			".wpq_scrim{position:absolute;inset:0;background:var(--wpq-scrim,transparent);pointer-events:none}",
 			// Control affordances sit above the inert wallpaper layer and take
@@ -66,7 +71,7 @@ window.__ModuleLoader__.load({
 			// stable seam, so no panel, dock or modal is caught by the rule. Both
 			// key off the attribute the plugin sets on the frame, so the whole
 			// override stops applying the moment the layer unmounts.
-			'div[class*="_frame"][data-wp-active="1"]{background:transparent!important}',
+			'div[class*="_frame"][data-wp-active="1"]{background:transparent!important;position:relative;z-index:1}',
 			'div[class*="_frame"][data-wp-active="1"] [data-slot="main.conversation"]>*{background:transparent!important}',
 			// Backstop for anything outside the frame. Once the frame is
 			// transparent, an unpainted strip of document would show the shell's
@@ -78,13 +83,18 @@ window.__ModuleLoader__.load({
 			'html:has(div[class*="_frame"][data-wp-active="1"]),body:has(div[class*="_frame"][data-wp-active="1"]),body:has(div[class*="_frame"][data-wp-active="1"])>div:first-child{background:var(--wpq-page,transparent)}',
 			// The sidebar's own fill is an opaque light panel, which reads as a
 			// hard white slab against the wallpaper. Give it glass instead: a
-			// heavily blurred, lightly tinted copy of the shell's own base colour
-			// so the wallpaper shows through blurred rather than through a hole.
+			// blurred, lightly tinted copy of the shell's own base colour so the
+			// wallpaper shows through blurred rather than through a hole.
 			// `backdrop-filter` does the blurring, so the sidebar keeps its text
-			// contrast in both palettes without pinning a colour of its own, and
-			// the wallpaper's own brightness still varies the result. The theme
-			// token means this follows light/dark on its own.
-			'[data-wp-active="1"] [class*="_sidebarCol"]{background:color-mix(in srgb,var(--dsw-alias-bg-base) 42%,transparent)!important;backdrop-filter:blur(22px) saturate(1.6);-webkit-backdrop-filter:blur(22px) saturate(1.6);opacity:1!important}'
+			// contrast in both palettes without pinning a colour of its own.
+			//
+			// The tint stays light so the sidebar's labels keep their contrast
+			// over a bright wallpaper; the colour of the wallpaper still shows
+			// through, which is what makes it read as glass rather than as white
+			// glass. The blur is heavy because the sidebar is a long, narrow strip
+			// — at lower radii the wallpaper behind it stays legible and competes
+			// with the session titles.
+			'[data-wp-active="1"] [class*="_sidebarCol"]{background:color-mix(in srgb,var(--dsw-alias-bg-base) 22%,transparent)!important;backdrop-filter:blur(42px) saturate(1.35);-webkit-backdrop-filter:blur(42px) saturate(1.35);opacity:1!important}'
 		].join("");
 		const styleTagId = "dsh-wallpaper/styles";
 		if (typeof document !== "undefined" && document.querySelector("style[data-plugin-css=" + JSON.stringify(styleTagId) + "]") === null) {
@@ -415,14 +425,17 @@ window.__ModuleLoader__.load({
 				if (!item) return;
 				const el = document.querySelector('[class*="_frame"]');
 				if (el === null) return;
-				setFrame(el);
+				// Portalled to the body, not to the frame. The frame sets
+				// `overflow: hidden`, so anything larger than the frame's own box
+				// is clipped — which is what left a bare band along the bottom
+				// however the layer was sized. The body has no such clip, and a
+				// fixed layer there covers the viewport regardless of how the
+				// shell's own layout resolves.
+				setFrame(document.body);
 				el.setAttribute("data-wp-active", "1");
-				// Paint the page roots dark for as long as a wallpaper is showing.
-				// Any strip of document outside the frame would otherwise show
-				// the shell's own light fill as a white band along the bottom,
-				// and the layer cannot cover that strip because the frame clips
-				// it. The tone mixes the shell's base token with black, so it
-				// follows the light/dark palette instead of pinning a colour.
+				// Backstop for any strip of document the viewport layer somehow
+				// does not reach. Removed with the layer, and derived from the
+				// shell's own base token so it follows the light/dark palette.
 				const root = document.documentElement;
 				const previous = root.style.getPropertyValue("--wpq-page");
 				root.style.setProperty("--wpq-page", `color-mix(in srgb, var(--dsw-alias-bg-base) 70%, black)`);
