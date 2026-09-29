@@ -1,0 +1,9 @@
+# dsh home-level user patch layer.
+#
+# Written by dsh-wallpaper\remount.cmd. This is the only file the
+# plugin adds to the dsh installation: delete it to unmount, or run
+# dsh-wallpaper\unmount.cmd. dsh's own packages are never modified.
+
+- insert:
+    - id: wallpaper
+      name: 'C:/Users/zxh/.minimax/sessions/mvs_95b31c953f2a4b1ca9c70596f3d06aa5/workspace/dsh-wallpaper/lib/index.js'
