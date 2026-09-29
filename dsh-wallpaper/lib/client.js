@@ -24,7 +24,13 @@ window.__ModuleLoader__.load({
 			// and given a negative z-index, which paints it after the frame's own
 			// fill but before its in-flow children — the columns — exactly the
 			// ordering a background needs.
-			".wpq_root{position:absolute;inset:0;z-index:-1;pointer-events:none;overflow:hidden}",
+			//
+			// It is sized to the viewport rather than to the frame. The frame is a
+			// grid that resolves against its own box, and any strip of page
+			// outside it stayed unpainted, which showed up as a bare band along
+			// the bottom once a wallpaper was set. Locking the layer to the
+			// viewport closes that gap for any frame geometry.
+			".wpq_root{position:absolute;top:0;left:0;width:100vw;height:100vh;z-index:-1;pointer-events:none;overflow:hidden}",
 			".wpq_layer{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block}",
 			".wpq_scrim{position:absolute;inset:0;background:var(--wpq-scrim,transparent);pointer-events:none}",
 			// Control affordances sit above the inert wallpaper layer and take
@@ -62,6 +68,14 @@ window.__ModuleLoader__.load({
 			// override stops applying the moment the layer unmounts.
 			'div[class*="_frame"][data-wp-active="1"]{background:transparent!important}',
 			'div[class*="_frame"][data-wp-active="1"] [data-slot="main.conversation"]>*{background:transparent!important}',
+			// Backstop for anything outside the frame. Once the frame is
+			// transparent, an unpainted strip of document would show the shell's
+			// own light fill as a bare band along the bottom. Painting the page
+			// and app roots with the scrim colour means any such gap reads as
+			// part of the wallpaper instead of as a white bar. Scoped to
+			// `data-wp-active` reaching the root, so it disappears with the
+			// layer.
+			'html:has(div[class*="_frame"][data-wp-active="1"]),body:has(div[class*="_frame"][data-wp-active="1"]),body:has(div[class*="_frame"][data-wp-active="1"])>div:first-child{background:var(--wpq-page,transparent)}',
 			// The sidebar's own fill is an opaque light panel, which reads as a
 			// hard white slab against the wallpaper. Give it glass instead: a
 			// heavily blurred, lightly tinted copy of the shell's own base colour
@@ -400,10 +414,23 @@ window.__ModuleLoader__.load({
 			(0, react.useEffect)(() => {
 				if (!item) return;
 				const el = document.querySelector('[class*="_frame"]');
-				if (!el) return;
+				if (el === null) return;
 				setFrame(el);
 				el.setAttribute("data-wp-active", "1");
-				return () => el.removeAttribute("data-wp-active");
+				// Paint the page roots dark for as long as a wallpaper is showing.
+				// Any strip of document outside the frame would otherwise show
+				// the shell's own light fill as a white band along the bottom,
+				// and the layer cannot cover that strip because the frame clips
+				// it. The tone mixes the shell's base token with black, so it
+				// follows the light/dark palette instead of pinning a colour.
+				const root = document.documentElement;
+				const previous = root.style.getPropertyValue("--wpq-page");
+				root.style.setProperty("--wpq-page", `color-mix(in srgb, var(--dsw-alias-bg-base) 70%, black)`);
+				return () => {
+					el.removeAttribute("data-wp-active");
+					if (previous) root.style.setProperty("--wpq-page", previous);
+					else root.style.removeProperty("--wpq-page");
+				};
 			}, [item]);
 
 			return (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, {
