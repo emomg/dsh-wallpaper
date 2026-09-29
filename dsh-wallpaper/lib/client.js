@@ -62,9 +62,15 @@ window.__ModuleLoader__.load({
 			// override stops applying the moment the layer unmounts.
 			'div[class*="_frame"][data-wp-active="1"]{background:transparent!important}',
 			'div[class*="_frame"][data-wp-active="1"] [data-slot="main.conversation"]>*{background:transparent!important}',
-			// Sidebar keeps its own fill so labels stay legible; it is dimmed
-			// instead of removed.
-			'[data-wp-active="1"] [class*="_sidebarCol"]{opacity:.92}'
+			// The sidebar's own fill is an opaque light panel, which reads as a
+			// hard white slab against the wallpaper. Give it glass instead: a
+			// heavily blurred, lightly tinted copy of the shell's own base colour
+			// so the wallpaper shows through blurred rather than through a hole.
+			// `backdrop-filter` does the blurring, so the sidebar keeps its text
+			// contrast in both palettes without pinning a colour of its own, and
+			// the wallpaper's own brightness still varies the result. The theme
+			// token means this follows light/dark on its own.
+			'[data-wp-active="1"] [class*="_sidebarCol"]{background:color-mix(in srgb,var(--dsw-alias-bg-base) 42%,transparent)!important;backdrop-filter:blur(22px) saturate(1.6);-webkit-backdrop-filter:blur(22px) saturate(1.6);opacity:1!important}'
 		].join("");
 		const styleTagId = "dsh-wallpaper/styles";
 		if (typeof document !== "undefined" && document.querySelector("style[data-plugin-css=" + JSON.stringify(styleTagId) + "]") === null) {
