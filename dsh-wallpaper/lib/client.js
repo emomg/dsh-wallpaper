@@ -6,6 +6,7 @@ window.__ModuleLoader__.load({
 		Object.defineProperty(exports, Symbol.toStringTag, { value: "Module" });
 		let react_jsx_runtime = require("react/jsx-runtime");
 		let react = require("react");
+		let react_dom = require("react-dom");
 
 		//#region styles
 		/**
@@ -16,13 +17,23 @@ window.__ModuleLoader__.load({
 		* plugin-side media query.
 		*/
 		const css = [
-			".wpq_root{position:absolute;inset:0;z-index:0;pointer-events:none;overflow:hidden}",
+			// A backdrop has to paint below the shell's columns, and the overlay
+			// seat cannot do that: its layer carries `z-index: 20`, so anything
+			// rendered inside it stays above the sidebar, center column and
+			// rightbar. The layer is therefore portalled onto the frame element
+			// and given a negative z-index, which paints it after the frame's own
+			// fill but before its in-flow children — the columns — exactly the
+			// ordering a background needs.
+			".wpq_root{position:absolute;inset:0;z-index:-1;pointer-events:none;overflow:hidden}",
 			".wpq_layer{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block}",
 			".wpq_scrim{position:absolute;inset:0;background:var(--wpq-scrim,transparent);pointer-events:none}",
 			// Control affordances sit above the inert wallpaper layer and take
 			// pointer events back.
 			".wpq_ui{position:absolute;right:16px;bottom:16px;z-index:25;display:flex;flex-direction:column;align-items:flex-end;gap:8px;pointer-events:none}",
 			".wpq_ui>*{pointer-events:auto}",
+			// Visually hidden but still in the tree: the file input stays reachable
+			// for assistive tech and for direct programmatic use.
+			".wpq_file{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}",
 			".wpq_tab{position:relative;display:inline-flex;align-items:center;gap:6px;padding:6px 10px;border-radius:10px;border:.5px solid var(--dsw-alias-border-l3);background:var(--dsw-elevation-panel,var(--dsw-specific-sidebar-fill));color:inherit;font:inherit;font-size:13px;cursor:pointer;backdrop-filter:blur(8px);box-shadow:0 1px 4px var(--dsw-elevation-stroke-color,#0000001f)}",
 			".wpq_tab:hover{filter:brightness(1.08)}",
 			".wpq_badge{min-width:16px;height:16px;padding:0 4px;border-radius:8px;background:var(--dsw-elevation-stroke,var(--dsw-alias-border-l3));font-size:11px;line-height:16px;text-align:center}",
@@ -38,12 +49,19 @@ window.__ModuleLoader__.load({
 			".wpq_item{display:flex;align-items:center;gap:6px}",
 			".wpq_itemName{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;opacity:.85}",
 			".wpq_empty{opacity:.6;padding:6px 0}",
-			// While a wallpaper is showing, the shell frame's own opaque fill is
-			// the only thing hiding it; centerCol and rightbarCol are already
-			// transparent. Scoped to the frame so nothing else in the app is
-			// affected, and driven by a data attribute the plugin owns so the
-			// rule stops applying the moment the layer unmounts.
-			'[data-wp-active="1"]>div[class*="_frame"]{background:transparent!important}',
+			// While a wallpaper is showing, the shell's own opaque fills are the
+			// only things hiding it. Two surfaces carry the opaque base token:
+			// the frame, and the conversation root that fills the center column.
+			// Everything between them (centerCol, rightbarCol, body, scrollBody)
+			// is already transparent, so lifting these two is sufficient.
+			//
+			// The frame is matched by its class fragment; the conversation root
+			// is matched through the `data-slot` contract instead, which is a
+			// stable seam, so no panel, dock or modal is caught by the rule. Both
+			// key off the attribute the plugin sets on the frame, so the whole
+			// override stops applying the moment the layer unmounts.
+			'div[class*="_frame"][data-wp-active="1"]{background:transparent!important}',
+			'div[class*="_frame"][data-wp-active="1"] [data-slot="main.conversation"]>*{background:transparent!important}',
 			// Sidebar keeps its own fill so labels stay legible; it is dimmed
 			// instead of removed.
 			'[data-wp-active="1"] [class*="_sidebarCol"]{opacity:.92}'
@@ -156,11 +174,10 @@ window.__ModuleLoader__.load({
 		//#endregion
 
 		//#region components
-		const react_useState = react.useState;
-		const react_useEffect = react.useEffect;
-		const react_useRef = react.useRef;
-		const react_useMemo = react.useMemo;
-		const react_useCallback = react.useCallback;
+		// React is reached through runtime property access (`react.useState`)
+		// rather than destructured at module scope: the bundle graph is lazy, so
+		// `require("react")` resolves to a placeholder that only carries real
+		// exports once this factory is materialized.
 
 		/**
 		* The wallpaper surface itself: one media element for the current item, a
@@ -170,8 +187,8 @@ window.__ModuleLoader__.load({
 		* @returns the wallpaper layer, or null.
 		*/
 		function WallpaperLayer({ item, playing, dim, blurPx, opacity }) {
-			const videoRef = react_useRef(null);
-			react_useEffect(() => {
+			const videoRef = (0, react.useRef)(null);
+			(0, react.useEffect)(() => {
 				const el = videoRef.current;
 				if (!el) return;
 				if (playing) {
@@ -271,17 +288,20 @@ window.__ModuleLoader__.load({
 		/** Required service: the UI slot registry. */
 		const inject = ["slots"];
 		/**
-		* Register the wallpaper surface into the shell's overlay slot. The plugin
-		* owns one state object; every control writes through a single updater so
-		* persistence never drifts from what is on screen.
-		* @param ctx - Client root context.
+		* The plugin root, registered as a real React component.
+		*
+		* Hooks may only run while React is rendering, so all plugin state lives
+		* here rather than in `apply`, which runs outside any render pass. The
+		* plugin owns one settings object and every control writes through a
+		* single updater, so persistence never drifts from what is on screen.
+		* @returns the wallpaper layer plus its control affordances.
 		*/
-		function apply(ctx) {
-			const [settings, setSettings] = react_useState(loadSettings);
-			const [panelOpen, setPanelOpen] = react_useState(false);
-			const fileRef = react_useRef(null);
+		function WallpaperRoot() {
+			const [settings, setSettings] = (0, react.useState)(loadSettings);
+			const [panelOpen, setPanelOpen] = (0, react.useState)(false);
+			const fileRef = (0, react.useRef)(null);
 
-			const update = react_useCallback((key, value) => {
+			const update = (0, react.useCallback)((key, value) => {
 				setSettings((prev) => {
 					const next = { ...prev, [key]: value };
 					saveSettings(next);
@@ -289,11 +309,11 @@ window.__ModuleLoader__.load({
 				});
 			}, []);
 
-			const pick = react_useCallback(() => {
+			const pick = (0, react.useCallback)(() => {
 				if (fileRef.current) fileRef.current.click();
 			}, []);
 
-			const onFiles = react_useCallback((event) => {
+			const onFiles = (0, react.useCallback)((event) => {
 				const files = event.target.files;
 				if (!files || files.length === 0) return;
 				buildItems(files).then((items) => {
@@ -311,7 +331,7 @@ window.__ModuleLoader__.load({
 
 			// Rotate through the library on the configured interval. Videos keep
 			// looping on their own, so the timer only advances stills.
-			react_useEffect(() => {
+			(0, react.useEffect)(() => {
 				if (settings.items.length < 2) return;
 				if (settings.repeat === "off") return;
 				const timer = setInterval(() => {
@@ -330,27 +350,35 @@ window.__ModuleLoader__.load({
 			// The frame only goes transparent while a wallpaper is on screen; the
 			// attribute is the switch the stylesheet keys off, so removing the
 			// layer restores the shell's own background with no extra cleanup.
-			react_useEffect(() => {
+			// The same lookup yields the portal target: the layer is rendered
+			// there instead of inside the overlay seat, which sits above the
+			// columns and would hide it.
+			const [frame, setFrame] = (0, react.useState)(null);
+			(0, react.useEffect)(() => {
 				if (!item) return;
-				const frame = document.querySelector('[class*="_frame"]');
-				if (!frame) return;
-				frame.setAttribute("data-wp-active", "1");
-				return () => frame.removeAttribute("data-wp-active");
+				const el = document.querySelector('[class*="_frame"]');
+				if (!el) return;
+				setFrame(el);
+				el.setAttribute("data-wp-active", "1");
+				return () => el.removeAttribute("data-wp-active");
 			}, [item]);
 
-			const root = (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, {
+			return (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, {
 				children: [
-					(0, react_jsx_runtime.jsx)(WallpaperLayer, {
+					// Portalled to the frame so the backdrop paints behind the
+					// columns; the controls stay in the overlay seat, where the
+					// shell already keeps floating surfaces.
+					frame ? (0, react_dom.createPortal)((0, react_jsx_runtime.jsx)(WallpaperLayer, {
 						item,
 						playing: settings.playing,
 						dim: settings.dim,
 						blurPx: settings.blurPx,
 						opacity: settings.opacity
-					}),
+					}), frame) : null,
 					(0, react_jsx_runtime.jsxs)("div", {
 						className: "wpq_ui",
 						children: [
-							(0, react_jsx_runtime.jsx)("input", { ref: fileRef, type: "file", accept: "image/*,video/*", multiple: true, onChange: onFiles, style: { display: "none" } }),
+							(0, react_jsx_runtime.jsx)("input", { ref: fileRef, type: "file", accept: "image/*,video/*", multiple: true, onChange: onFiles, className: "wpq_file", "aria-label": "Choose wallpaper files" }),
 							(0, react_jsx_runtime.jsxs)("button", {
 								className: "wpq_tab",
 								onClick: () => setPanelOpen((open) => !open),
@@ -365,11 +393,27 @@ window.__ModuleLoader__.load({
 					})
 				]
 			});
-
-			ctx.effect(() => ctx.slots.register({ name: "shell.overlay" }, () => root), "dsh-wallpaper: wallpaper layer + settings");
 		}
 		//#endregion
 
+		/**
+		* Register the wallpaper root into the shell's overlay slot. `apply` only
+		* declares work for the slot registry; every hook call lives in the
+		* component above, which React renders.
+		*
+		* `shell.overlay` is declared by ui-layout's root entry, so registration
+		* goes through `slots.inject` to wait for that declaration instead of
+		* racing it. The slot is an additive list seat, so entries are keyed by
+		* their own `id` and sit beside the shipped occupants rather than
+		* shadowing them; the layer is click-through until an occupant opts into
+		* pointer events.
+		* @param ctx - Client root context.
+		*/
+		function apply(ctx) {
+			ctx.slots.inject("shell.overlay", () => ctx.slots.register({ name: "shell.overlay", id: "dsh-wallpaper" }, WallpaperRoot));
+		}
+
+		exports.WallpaperRoot = WallpaperRoot;
 		exports.apply = apply;
 		exports.inject = inject;
 		return module.exports;
