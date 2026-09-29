@@ -353,36 +353,14 @@ window.__ModuleLoader__.load({
 			// The same lookup yields the portal target: the layer is rendered
 			// there instead of inside the overlay seat, which sits above the
 			// columns and would hide it.
-			//
-			// The frame is not guaranteed to exist when this runs. The plugin
-			// applies as soon as its own entry starts, which can be before
-			// ui-layout has mounted the frame, so a single miss used to leave the
-			// wallpaper permanently invisible — the effect never ran again for
-			// that item. It now retries until the frame shows up, re-resolving on
-			// every attempt, and releases the attribute on cleanup.
 			const [frame, setFrame] = (0, react.useState)(null);
 			(0, react.useEffect)(() => {
 				if (!item) return;
-				let cancelled = false;
-				let timer;
-				let target = null;
-				const attach = () => {
-					if (cancelled) return;
-					const el = document.querySelector('[class*="_frame"]');
-					if (el === null) {
-						timer = setTimeout(attach, 100);
-						return;
-					}
-					target = el;
-					el.setAttribute("data-wp-active", "1");
-					setFrame(el);
-				};
-				attach();
-				return () => {
-					cancelled = true;
-					if (timer !== undefined) clearTimeout(timer);
-					if (target !== null) target.removeAttribute("data-wp-active");
-				};
+				const el = document.querySelector('[class*="_frame"]');
+				if (!el) return;
+				setFrame(el);
+				el.setAttribute("data-wp-active", "1");
+				return () => el.removeAttribute("data-wp-active");
 			}, [item]);
 
 			return (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, {
