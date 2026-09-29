@@ -230,7 +230,28 @@ window.__ModuleLoader__.load({
 		* @param {object} props - Settings plus a change callback.
 		* @returns the panel element.
 		*/
-		function SettingsPanel({ settings, onChange, onPick, onClose }) {
+		function SettingsPanel({ settings, onChange, onPick, onReset, onClose }) {
+			/**
+			* Commit a numeric field.
+			*
+			* An emptied `<input type="number">` reports `""`, and `Number("")` is
+			* 0 — writing that straight through meant clearing a field silently
+			* stored 0. For Opacity that hides the wallpaper completely with no
+			* obvious way back, because the stored value persists. An empty or
+			* unparseable draft is therefore ignored and the previous value stands,
+			* and a parsed value is clamped into the field's own range so a
+			* half-typed number never lands out of bounds.
+			* @param {string} key - Setting to write.
+			* @param {string|number} raw - Raw input value.
+			* @param {number} min - Field lower bound.
+			* @param {number} max - Field upper bound.
+			*/
+			const commitNumber = (key, raw, min, max) => {
+				if (raw === "" || raw === null || raw === void 0) return;
+				const value = Number(raw);
+				if (!Number.isFinite(value)) return;
+				onChange(key, Math.min(max, Math.max(min, value)));
+			};
 			const numberField = (key, label, min, max, step) => (0, react_jsx_runtime.jsx)("label", {
 				className: "wpq_row",
 				children: [(0, react_jsx_runtime.jsx)("span", { className: "wpq_label", children: label }), (0, react_jsx_runtime.jsxs)("input", {
@@ -240,7 +261,7 @@ window.__ModuleLoader__.load({
 					max,
 					step,
 					value: settings[key],
-					onChange: (e) => onChange(key, Number(e.target.value))
+					onChange: (e) => commitNumber(key, e.target.value, min, max)
 				})]
 			});
 			return (0, react_jsx_runtime.jsxs)("div", {
@@ -254,9 +275,13 @@ window.__ModuleLoader__.load({
 						className: "wpq_row",
 						children: [(0, react_jsx_runtime.jsx)("span", { className: "wpq_label", children: "Library" }), (0, react_jsx_runtime.jsx)("button", { className: "wpq_btn", onClick: onPick, children: "Add images / videos…" })]
 					}),
+					(0, react_jsx_runtime.jsx)("div", {
+						className: "wpq_row",
+						children: [(0, react_jsx_runtime.jsx)("span", { className: "wpq_label", children: "Appearance" }), (0, react_jsx_runtime.jsx)("button", { className: "wpq_btn", onClick: onReset, children: "Reset" })]
+					}),
 					numberField("dim", "Dim", 0, 0.9, 0.05),
 					numberField("blurPx", "Blur (px)", 0, 40, 1),
-					numberField("opacity", "Opacity", 0, 1, 0.05),
+					numberField("opacity", "Opacity (0=hidden)", 0, 1, 0.05),
 					numberField("intervalSec", "Interval (s)", 5, 3600, 5),
 					(0, react_jsx_runtime.jsx)("label", {
 						className: "wpq_row",
@@ -304,6 +329,18 @@ window.__ModuleLoader__.load({
 			const update = (0, react.useCallback)((key, value) => {
 				setSettings((prev) => {
 					const next = { ...prev, [key]: value };
+					saveSettings(next);
+					return next;
+				});
+			}, []);
+
+			// Escape hatch for settings that were already persisted in a state
+			// that hides the wallpaper — most easily reached before numeric
+			// fields clamped their input, when clearing one stored 0. Restores
+			// every non-library value; the wallpaper library itself is untouched.
+			const reset = (0, react.useCallback)(() => {
+				setSettings((prev) => {
+					const next = { ...DEFAULTS, items: prev.items, index: prev.index };
 					saveSettings(next);
 					return next;
 				});
@@ -388,7 +425,7 @@ window.__ModuleLoader__.load({
 									settings.items.length > 0 ? (0, react_jsx_runtime.jsx)("span", { className: "wpq_badge", children: String(settings.items.length) }) : null
 								]
 							}),
-							panelOpen ? (0, react_jsx_runtime.jsx)(SettingsPanel, { settings, onChange: update, onPick: pick, onClose: () => setPanelOpen(false) }) : null
+							panelOpen ? (0, react_jsx_runtime.jsx)(SettingsPanel, { settings, onChange: update, onPick: pick, onReset: reset, onClose: () => setPanelOpen(false) }) : null
 						]
 					})
 				]
