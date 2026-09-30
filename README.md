@@ -120,6 +120,80 @@ elevation 投影本身已经带了那根 0.5px 发丝描边，再叠一层 `--ds
 侧栏、弹窗、标题栏上那层玻璃的模糊半径单独由 `--wpq-glass-blur` 提供，默认是
 `none` 这个关键字——`blur(none)` 合法，且等于完全不建 backdrop-filter 图层。
 
+## 轨迹视图
+
+轨迹视图是唯一一处"自带一整套外壳"的视图：它不共享对话视图的容器，而是自己刷底色。
+之前那条 `[data-slot="main.conversation"]>*` 够不到它，因为轨迹的表面是
+`main.conversation` 的**孙**节点，不是子节点。
+
+整个视图挂在一个**槽位契约**下面，这是稳定接缝，不是构建哈希：
+
+```
+conversation.view
+└─ <view root>            视图容器本身
+   ├─ <toolbar>           时长 / 轮次 / 调用 过滤行和搜索框
+   ├─ <plot section>      └─ <plot>   token 计量条
+   └─ <ledger>            轮次列表
+      └─ <split>          └─ <table pane> └─ <table>
+```
+
+内层用**语义类名后缀**匹配（`_ledger` / `_split` / `_tablePane`）加一个 `table` 元素
+选择器，和右侧栏用 `_pane` 是同一个思路：构建换了 CSS-module 哈希也不会失效。
+
+轨迹里要分两类处理，混在一起就会出问题：
+
+| 部分 | 处理 | 原因 |
+| --- | --- | --- |
+| 视图容器、`_ledger`、`_split`、`_tablePane`、`table` | 完全透明 | 读内容的区域，壁纸透上来才对 |
+| 工具栏、计量区（视图根的直接子 `_root`） | 毛玻璃表面 | 32px / 50px 的控件条，没有底衬就是两块浮在壁纸上的字 |
+
+第二类一开始也做成了全透明，结果就是"太透了没法用"——控件压在一张会动的图上，
+读不清。给它们和侧栏同一份毛玻璃，问题就没了。
+
+**不能**再往下放宽：token 计量条、搜索框和输入卡片在更深一层，它们各自的底色正是
+让轨迹在任何壁纸上都还读得清的原因。实测过：把它们一起透明掉，计量条就失去了参照。
+
+> 这套选择器是挂调试端口实测出来的，不是猜的。定位方法见下面"怎么自己查"。
+
+## 怎么自己查
+
+外壳的类名是构建期哈希，靠读代码猜不出来。桌面版起一个 CDP 端口就能看到真实 DOM：
+
+```powershell
+Stop-Process -Name "DeepSeek Harness" -Force
+Start-Process "D:\dsh-official\DeepSeek Harness\DeepSeek Harness.exe" `
+  -ArgumentList '--remote-debugging-port=9222'
+```
+
+然后 `GET http://127.0.0.1:9222/json/list` 拿到页面的 `webSocketDebuggerUrl`，用
+`Runtime.evaluate` 跑两段：
+
+```js
+// 1. 切到出问题的视图
+[...document.querySelectorAll('button,[role="tab"],a,div')]
+  .find(n => (n.textContent||'').trim() === '轨迹' && n.getBoundingClientRect().width > 0)
+  .click();
+
+// 2. 列出所有还在刷底色的大块元素，带类名和位置
+[...document.querySelectorAll('body *')].filter(el => {
+  const r = el.getBoundingClientRect();
+  return r.width > 300 && r.height > 30
+    && getComputedStyle(el).backgroundColor !== 'rgba(0, 0, 0, 0)';
+}).map(el => `${el.tagName}.${el.className} ${getComputedStyle(el).backgroundColor}`);
+```
+
+**候选规则可以直接注入正在运行的页面验证**，不用改一行代码就能看到效果：
+
+```js
+const tag = document.createElement('style');
+tag.id = 'probe-test';
+tag.textContent = '你的候选规则';
+document.head.appendChild(tag);
+```
+
+满意之后再写进 bundle，替换掉那张一次性的 `<style>`。这个循环比"改代码—重启—看效果"
+快得多。查完记得把应用正常重启一次（不带调试端口），bundle 是启动时快照。
+
 ## 右侧栏那个选择器，标签是必需的
 
 ```
@@ -257,6 +331,42 @@ Import…」会把它拉下来，走**和手动选文件完全相同**的入库�
 > 仓库因此多了约 44 MB —— mp4 已经是压缩格式，git 不会再压一遍。GitHub 单文件 50 MB
 > 会告警、100 MB 会硬拒，这两个都还在安全线内。
 
+## 玻璃模糊（Glass blur）
+
+面板上那个 **Glass blur (px)** 控制的是 `backdrop-filter: blur()` 的半径，作用在
+**侧栏、弹窗、Windows 标题栏、轨迹的控件条**这几块表面上。效果就是毛玻璃：壁纸的
+颜色透上来，但被糊开，所以底下的画面不会和上面的文字抢注意力。
+
+底色是固定 62%（`GLASS_TINT`），不提供调节：它要保证任何壁纸之上文字都读得清，
+那是可读性底线而不是口味问题。
+
+| 模糊 | 观感 | 代价 |
+| --- | --- | --- |
+| 0 | 平涂半透明，壁纸轮廓仍可见 | 最省，集成显卡上最安全 |
+| 12（默认） | 明显的磨砂，壁纸轮廓化开 | 中等；外壳自己的浮层就是这个量级 |
+| 24（上限） | 更强的虚化 | 大半径 backdrop-filter 是合成器压力最大的一项 |
+
+默认给 12 而不是 0，是因为平涂的半透明**不是**外壳用的那种材质——侧栏看起来像出
+了 bug，而不是像一种风格。
+
+### 一个值得记住的坑
+
+滤镜值必须整体交给变量，样式表里不能这么写：
+
+```css
+/* 错的：展开成裸的 12px，而 12px 不是滤镜函数 */
+backdrop-filter: var(--wpq-glass-blur) saturate(1.35);
+/* 同样错：none 不能和其他函数并列 */
+backdrop-filter: var(--wpq-glass-blur) saturate(1.35);   /* --wpq-glass-blur: none */
+```
+
+两种情况都会在解析期被整条丢弃——**不报错、不警告，只是永远不生效**，而旁边那条
+`!important` 的 background 照常生效，看上去就像"底色在、模糊不在"。所以变量持有的是
+**完整的滤镜函数列表**（`blur(12px) saturate(1.35)` 或 `none`），由 JS 拼好再写进去。
+
+`none` 和 `blur(0px)` 也要分清：前者不产生滤镜图层，后者仍然要建一层，白付合成器
+开销。
+
 ## 为什么模糊和视频都默认关掉
 
 渲染进程崩溃过一次，11 次 crash 日志里没有任何 JS 错误——那种"崩"不是脚本抛异常，
@@ -269,7 +379,8 @@ Import…」会把它拉下来，走**和手动选文件完全相同**的入库�
 三样都开着的时候合成器压力足够把 renderer 带走，dsh 随即重启，再崩，于是变成
 崩溃-重启死循环。所以现在：
 
-- `--wpq-glass-blur` 默认 `none`，模糊半径做成面板里 0–24 的可调项；
+- 玻璃模糊从 42px 降到默认 12px，并且只作用在一块全高表面（侧栏）加几条窄条上，
+  不再是三块全高表面同时上大半径；面板里 0–24 仍然可调；
 - 视频默认不自动播放，要自己在面板里点开；
 - 开启"减少动态效果"时视频强制暂停；
 - 窗口不可见时暂停解码，回到前台再续上。
