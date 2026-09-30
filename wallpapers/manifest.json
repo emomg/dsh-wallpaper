@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "wallpapers": [
+    {
+      "name": "horizon-sky-wanderer.mp4",
+      "url": "./horizon-sky-wanderer.mp4",
+      "kind": "video",
+      "type": "video/mp4",
+      "size": 25302036,
+      "credit": "moewalls.com"
+    },
+    {
+      "name": "2828169067.mp4",
+      "url": "./2828169067.mp4",
+      "kind": "video",
+      "type": "video/mp4",
+      "size": 20818000
+    }
+  ]
+}
