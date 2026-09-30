@@ -1,0 +1,9 @@
+# Bundle patch layer for dsh-wallpaper.
+#
+# The plugin row names the package rather than a path so Node's module
+# resolution finds the installed code from the profile that lists this
+# bundle. Applied after @deepseek-ai/dsh-base and @deepseek-ai/dsh-web-app,
+# and before the profile's own cordis.patch.yml and the home-level layer.
+- insert:
+    - id: wallpaper
+      name: dsh-wallpaper

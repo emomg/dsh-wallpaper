@@ -7,28 +7,47 @@ Wallpaper Engine 对桌面所做的事，只不过发生在应用内部——并
 
 ## 功能
 
-- **图片与视频壁纸。** 视频静音循环播放；浏览器自动播放策略拒绝时会被静默吞掉，
-  不会抛错。
-- **本地壁纸库。** 从磁盘选择图片和视频，插件将其内联为 data URL 存入
-  `localStorage`，无需任何服务端或文件系统访问，重启后依然在。
+- **图片与视频壁纸。** 视频静音循环播放，**默认不自动播放**，需要在面板里手动
+  点开；系统开启"减少动态效果"时视频一律保持暂停。浏览器自动播放策略拒绝时会被
+  静默吞掉，不会抛错。
+- **本地壁纸库。** 从磁盘选择图片和视频，字节存进浏览器的 **IndexedDB**（对象仓库
+  `dsh-wallpaper/media`），设置项本身只存标量。不需要任何服务端或文件系统访问，
+  重启后依然在。
 - **播放列表。** 按间隔轮播壁纸库，支持 `one` / `all` / `off` 三种重复模式，
   也可手动指定某一张。
 - **压暗、模糊、透明度。** 默认值经过调校，保证任何壁纸之上对话文字都可读。
+- **玻璃模糊可调且默认关闭。** 侧栏、弹窗、标题栏的 `backdrop-filter` 半径由
+  `--wpq-glass-blur` 控制，默认 `none`——见下文"为什么模糊和视频都默认关掉"。
 - **跟随主题。** 所有颜色都用语义化的 `--dsw-*` token，插件自身不监听主题变化，
-  自动适配 dsh 的明暗配色。
+  自动适配 dsh 的明暗配色；圆角取自 `--dsw-radius-*` 共享档位，不引入局部数值。
 
 ## 安装
+
+插件是一个**组合包（bundle）**，`package.json` 里的 `dsh.bundle.patch` 指向
+`cordis.patch.yml`，由 `dsh plugin` 装进 profile：
+
+```
+dsh plugin --profile desktop add D:/dsh-official/plugins/dsh-wallpaper
+```
+
+不装进 profile、只想临时挂上时，仍然可以用 home 级补丁层（插件目录里两个脚本做
+的就是这件事）：
 
 ```
 dsh-wallpaper\remount.cmd
 ```
 
-然后启动 dsh。Web 界面右下角会出现壁纸控制按钮，点开面板即可添加壁纸。
+两条路**不要同时用**——插件行会挂载两次，控制按钮出现两个。`cordis.patch.yml` 里
+的插件行按**包名**而不是路径引用，正是为了让 pnpm 装出来的副本能被 Node 解析到；
+home 补丁层则按绝对路径引用自己这份 checkout。
+
+然后启动 dsh。界面右下角会出现壁纸控制按钮，点开面板即可添加壁纸。
 
 ## 卸载
 
 ```
-dsh-wallpaper\unmount.cmd
+dsh plugin --profile desktop remove dsh-wallpaper   # 组合包安装
+dsh-wallpaper\unmount.cmd                           # home 补丁层
 ```
 
 脚本会先备份再删除，随时可以重新装回来。
@@ -79,7 +98,7 @@ dsh-wallpaper\unmount.cmd
 出来那个框用的那一套：
 
 ```
-background:        var(--dsw-specific-menu)          /* 浅色 rgba(248,249,250,.58) */
+background:        var(--dsw-menu-surface-fill, var(--dsw-specific-menu))
 backdrop-filter:   var(--dsw-menu-backdrop-filter)   /* blur(40px) saturate(150%) */
 ```
 
@@ -90,9 +109,16 @@ backdrop-filter:   var(--dsw-menu-backdrop-filter)   /* blur(40px) saturate(150%
 | `--dsw-specific-menu` | `rgba(248,249,250,0.58)` 亮白半透 | `rgba(67,69,74,0.45)` 暗灰半透 |
 | `--dsw-alias-bg-document-preview` | `#ebeef2` | `#151517`（等于底色，一片黑） |
 
-弹窗额外带 `box-shadow: var(--dsw-elevation-panel)` 和 28px 圆角；右侧栏**不带**，
-因为它是通高的停靠栏，不是浮层卡片，用卡片的描边和阴影会不对味，它自己的左边框保留
-原样。
+浮层（面板、悬浮按钮、弹窗）一律 `border: 0` + 单一 elevation 投影——主题的
+elevation 投影本身已经带了那根 0.5px 发丝描边，再叠一层 `--dsw-alias-border-*`
+中性边框正是 ui-theme 的 elevation spec 会拒绝的那种组合。圆角走共享档位：
+紧凑控件 R8、标准输入 R12、悬浮面板 R28，面板 8px 内缩到内层表面 R20（同心内缩，
+内层 = 外层 − 内缩距离），计数徽章是刻意的胶囊，`999px` 必须与
+`corner-shape: round` 成对出现。右侧栏**不带**投影，因为它是通高的停靠栏，不是浮层
+卡片，它自己的左边框保留原样。
+
+侧栏、弹窗、标题栏上那层玻璃的模糊半径单独由 `--wpq-glass-blur` 提供，默认是
+`none` 这个关键字——`blur(none)` 合法，且等于完全不建 backdrop-filter 图层。
 
 ## 右侧栏那个选择器，标签是必需的
 
@@ -193,10 +219,44 @@ node "%USERPROFILE%\.dsh\profiles\node_modules\@deepseek-ai\dsh\lib\bin.js" --pr
 另外，`shell.overlay` 是 list 型槽位，注册时必须显式给出 `id`；它由 ui-layout
 的 root 条目声明，所以注册要走 `ctx.slots.inject`，等那条声明先就位。
 
+## 存储
+
+壁纸字节存在 IndexedDB 的 `dsh-wallpaper/media` 对象仓库里，`localStorage` 只留
+一份很小的设置文档（`dsh-wallpaper:settings`），里面是标量加一个纯元数据的壁纸库
+列表。
+
+**不要把媒体内联进设置文档。** 旧版本用 base64 data URL 存，一个 25 MB 的视频就
+变成 33 MB 的字符串，而 `localStorage` 没有增量写：改一次亮度就把整份文档重写一遍，
+背后的 leveldb 于是每次都多出一份完整副本。实测两个 33.7 MB 的 `.ldb` 就是这么来的。
+
+从旧版本升级时不需要手动处理：首次挂载会检测到条目里还带着内联字节，把它们搬进
+IndexedDB，然后重写设置文档把那段字符串彻底删掉；读不回来的条目直接丢弃，不会留
+一行永远坏死的记录。`--dump-config` 或应用数据目录里的 `Local Storage\leveldb` 可以
+用来确认搬迁是否完成。
+
+## 为什么模糊和视频都默认关掉
+
+渲染进程崩溃过一次，11 次 crash 日志里没有任何 JS 错误——那种"崩"不是脚本抛异常，
+是进程被从底下掀掉。触发条件是三件事叠在一起：
+
+1. 全屏 `<video>` 走硬件解码；
+2. 侧栏 / 弹窗 / 标题栏同时挂上全高的大半径 `backdrop-filter`；
+3. 显卡驱动很旧（本机 AMD 780M，驱动日期 2023-08）。
+
+三样都开着的时候合成器压力足够把 renderer 带走，dsh 随即重启，再崩，于是变成
+崩溃-重启死循环。所以现在：
+
+- `--wpq-glass-blur` 默认 `none`，模糊半径做成面板里 0–24 的可调项；
+- 视频默认不自动播放，要自己在面板里点开；
+- 开启"减少动态效果"时视频强制暂停；
+- 窗口不可见时暂停解码，回到前台再续上。
+
+真要根治，把显卡驱动更新掉比在插件里做任何取舍都管用。
+
 ## 已知限制
 
-- 壁纸以内联 data URL 形式存储，受 `localStorage` 容量限制（约 5 MB）。视频壁纸
-  会比较快地撞到这个上限；要做成 Wallpaper Engine 那种海量本地库，需要宿主侧
-  读文件系统的能力。
-- 一个窗口只对应一张壁纸。单窗口的 Web 客户端里，"每显示器不同壁纸"没有意义。
+- 壁纸库跟着浏览器的 IndexedDB 走，不跨设备同步；清浏览器数据会连同壁纸一起清掉。
+  要做成 Wallpaper Engine 那种海量本地库、需要跨会话共享，得走宿主侧读文件系统的
+  能力。
+- 一个窗口只对应一张壁纸。单窗口的客户端里，"每显示器不同壁纸"没有意义。
 - 没有屏保模式——那属于操作系统层面的事，在应用之外。
